@@ -27,7 +27,10 @@ library(hms)
 library(tidyverse)
 library(knitr)
 library(ggpubr)
-
+library(lubridate)
+library(zoo)
+library(forecast)
+library(chron)
 
 # invalidate cache when the tufte version changes
 knitr::opts_chunk$set(
@@ -45,7 +48,7 @@ options(tinytex.verbose = TRUE)
 # Description
 
 
-`r newthought('Intro text here')` Intro text here Intro text here Intro text here Intro text here Intro text here Intro text here Intro text here Intro text here. In general,
+`r newthought('The purpose of this report ')` is to revisit the flow of applications to the Transfer programs. 
     \href{https://blog.adstage.io/facebook-ads-benchmarks}{{\color{blue}{\underline{FB Newsfeed }}}} CTR overall experienced a 24% drop from July, 2017 - July, 2018.
 
 
@@ -55,16 +58,36 @@ options(tinytex.verbose = TRUE)
 
 ```{r}
 TransferApps <- read.csv("C:/Users/christine.iyer/Box/FY21_Transfer_App_Flow/All_Transfers_Born_After_1990.csv", header = T, stringsAsFactors = F)
-head(TransferApps)
+
+TransferApps <- TransferApps %>% 
+  mutate(App.Application.Date = as.Date(App.Application.Date, format = "%m/%d/%Y"), 
+                                        Created.Date = as.Date(Created.Date, format = "%m/%d/%Y"), 
+                                        Birthdate = as.Date(Birthdate, format = "%m/%d/%Y")) %>%
+  select(Email, Primary.City, Primary.State.Province, Primary.County, Birthdate, Created.Date, App.Application.Date, App.Application.Status, Student.Stage)
+  
+Confirmed <- c("Confirmed", "Withdrawn (After Confirmed)")
+Enrolled <- c("Enrolled")
+Admitted <- c("Admitted (Not Confirmed)", "Withdrawn (After Admitted)", "Withdrawn (After Decision)")
+SortedTransfers <- TransferApps %>% 
+  mutate(Stage = ifelse(App.Application.Status == "", "Inquiry", ifelse(App.Application.Status == "Enrolled", "Enrolled", 
+                                                                         ifelse(App.Application.Status %in% Admitted, "Admitted", 
+                                                                                ifelse(App.Application.Status %in% Confirmed, "Confirmed", "Applied")))))
+
+SortedTransfers <-  SortedTransfers %>% 
+  
+  group_by(Stage, Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province) %>% summarise(n = n()) %>% spread(Stage, n) %>% select(Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Inquiry, Applied, Admitted, Confirmed, Enrolled)
+
+
 ```
 
 
-__Margin Figures__
 
-Images and graphics play an integral role in Tufte's work. To place figures in the margin you can use the 
 
-```{r fig-margin, fig.margin = TRUE, fig.cap = "MPG vs horsepower, colored by transmission.", fig.width=3.5, fig.height=3.5, cache=TRUE, message=FALSE}
 
+```{r fig-margin, eval=FALSE, fig.cap="MPG vs horsepower, fig.height=3.5, fig.margin=TRUE, message=FALSE, cache=TRUE, colored by transmission.", fig.width=3.5, include=FALSE}
+# __Margin Figures__
+# 
+# Images and graphics play an integral role in Tufte's work. To place figures in the margin you can use the 
 colors <-  c("#F6A704", "#0E1033","#4E7B14","#A92007","#D47E0A")
 mtcars2 <- mtcars
 mtcars2$am <- factor(
@@ -76,27 +99,17 @@ a_a <- ggplot(mtcars2, aes(hp, mpg, color = am)) +
     scale_color_manual(
         values=colors)
 a_a
-```
-
-
-
-```{r}
 imgur_image <-
    add_imgur_image(
      image = a_a,
      client_id = "851117406f0b457"
    )
 
-```
-
 #
 
-__Save an Image to Email & Compose and Send an Email__
+#__Save an Image to Email & Compose and Send an Email__
 
-The plot to the side will be included in an email. 
-
-```{r eval=FALSE, include=FALSE}
-
+#The plot to the side will be included in an email. 
 
 body_text <-
   glue(
@@ -139,13 +152,184 @@ compose_email(body = body_text) %>%
 
 
 
-```{r}
-knitr::kable(
-  mtcars[1:6, 1:6], caption = 'A subset of mtcars.'
-)
+```{r fig.fullwidth = TRUE, fig.height=8}
+#tail(SortedTransfers)
+SortedTransfers1 <- SortedTransfers %>% 
+  mutate_at(6:10, ~replace(., is.na(.), 0)) %>% 
+  mutate(
+    Applied = sum(Applied) + sum(Admitted)+ sum(Confirmed) + sum(Enrolled), 
+    Admitted = sum(Admitted)+ sum(Confirmed) + sum(Enrolled),
+    Confirmed =  sum(Confirmed) + sum(Enrolled),
+    Enrolled = sum(Enrolled)) %>% 
+  group_by(App.Application.Date) %>% 
+  summarise(Applied = sum(Applied)) %>% 
+  filter(Applied > 0)
+
+
+SortedTransfers2 <-  SortedTransfers1 %>%
+  na.omit() %>% 
+  arrange(App.Application.Date)
+
+colorPalette <- c("#323DA5", "#FFC13D", "#4595A4", "#C55A82" )
+
+
+SortedTransfers3 <- SortedTransfers1 %>% 
+  mutate(Month = as.yearmon(App.Application.Date), 
+         Year = year(App.Application.Date), 
+         Month_1 = month(App.Application.Date), 
+         Month_2 = as.Date(paste0("2017-", Month_1,"-01"),"%Y-%m-%d")) %>% 
+  filter(Year >2016) %>% 
+  group_by(Month_2, Year) %>% 
+  summarise(Applied = sum(Applied))
+
+
+
+ggplot(SortedTransfers3, aes(x = Month_2,y = Applied)) +
+  geom_line(size = 1,color = "#323DA5") +
+  #geom_smooth(color = "#323DA5", se = FALSE)+
+  facet_wrap(~ Year, ncol = 1.1) +
+      labs(title = "Transfer Application Flow",
+           # subtitle = "Data plotted by year",
+           y = "Applications",
+           x = "") + 
+  theme_bw(base_size = 12)  +
+  scale_x_date(date_labels = "%b", breaks = SortedTransfers3$Month_2) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(strip.background =element_rect(fill="#FFC13D"))+
+  theme(strip.text = element_text(colour = '#323DA5'))
+
 ```
 
-# 
+
+```{r r, fig.width=10, fig.height=6, fig.fullwidth=TRUE}
+
+myts <- ts(SortedTransfers3$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
+ggseasonplot(myts, col = colorPalette) + 
+  geom_line(size = 1.3) + 
+  theme_bw()+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
+  labs(title = "Transfer Application Flow",
+           y = "Applications",
+           x = "")  + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+axis.title.x = element_text(color="black", size=12, face="bold"))
+
+```
+
+
+---
+
+```{r}
+TransferApps <- read.csv("C:/Users/christine.iyer/Box/FY21_Transfer_App_Flow/All_Transfers_Born_Anytime.csv", header = T, stringsAsFactors = F)
+
+ TransferApps <- TransferApps %>% 
+  mutate(App.Application.Date = as.Date(App.Application.Date, format = "%m/%d/%Y"), 
+                                        Created.Date = as.Date(Created.Date, format = "%m/%d/%Y"), 
+                                        Birthdate = as.Date(Birthdate, format = "%m/%d/%Y")) %>%
+  select(Email, Primary.City, Primary.State.Province, Primary.County, Birthdate, Created.Date, App.Application.Date, App.Application.Status, Student.Stage)
+  
+Confirmed <- c("Confirmed", "Withdrawn (After Confirmed)")
+Enrolled <- c("Enrolled")
+Admitted <- c("Admitted (Not Confirmed)", "Withdrawn (After Admitted)", "Withdrawn (After Decision)")
+SortedTransfers <- TransferApps %>% 
+  mutate(Stage = ifelse(App.Application.Status == "", "Inquiry", ifelse(App.Application.Status == "Enrolled", "Enrolled", 
+                                                                         ifelse(App.Application.Status %in% Admitted, "Admitted", 
+                                                                                ifelse(App.Application.Status %in% Confirmed, "Confirmed", "Applied")))))
+unique(SortedTransfers$Stage)
+SortedTransfers <-  SortedTransfers %>% 
+  
+  group_by(Stage, Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate) %>% summarise(n = n()) %>% spread(Stage, n) %>% select(Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate,Inquiry, Applied, Admitted, Confirmed, Enrolled)
+
+
+SortedTransfers <- SortedTransfers %>% mutate(AgeAtApp = difftime(App.Application.Date,Birthdate,  units = "weeks"), Age = as.numeric(round(AgeAtApp/52,0)), Age = ifelse(Age < 25, "24 and Under", "25 and Up"))
+```
+
+```{r fig.fullwidth=TRUE, fig.height=8, fig.width=6}
+
+#tail(SortedTransfers)
+SortedTransfers1 <- SortedTransfers %>% 
+  mutate_at(7:11, ~replace(., is.na(.), 0)) %>% 
+  mutate(
+    Applied = sum(Applied) + sum(Admitted)+ sum(Confirmed) + sum(Enrolled), 
+    Admitted = sum(Admitted)+ sum(Confirmed) + sum(Enrolled),
+    Confirmed =  sum(Confirmed) + sum(Enrolled),
+    Enrolled = sum(Enrolled)) %>% 
+  group_by(Age, App.Application.Date) %>% 
+  summarise(Applied = sum(Applied)) %>% 
+  filter(Applied > 0)
+
+
+SortedTransfers2 <-  SortedTransfers1 %>%
+  na.omit() %>% 
+  arrange(App.Application.Date)
+
+colorPalette <- c("#323DA5", "#FFC13D", "#4595A4", "#C55A82" )
+
+
+SortedTransfers3 <- SortedTransfers1 %>% 
+  mutate(Month = as.yearmon(App.Application.Date), 
+         Year = year(App.Application.Date), 
+         Month_1 = month(App.Application.Date), 
+         Month_2 = as.Date(paste0("2017-", Month_1,"-01"),"%Y-%m-%d")) %>% 
+  filter(Year >2016) %>% 
+  group_by(Month_2, Year, Age) %>% 
+  summarise(Applied = sum(Applied))
+
+
+
+ggplot(SortedTransfers3, aes(x = Month_2,y = Applied, group=Age, color=Age)) +
+  geom_line(size = 1) +
+  #geom_smooth(color = "#323DA5", se = FALSE)+
+  facet_wrap(~ Year, ncol = 1.1) +
+      labs(title = "Transfer Application Flow",
+           # subtitle = "Data plotted by year",
+           y = "Applications",
+           x = "") + 
+  theme_bw(base_size = 12)  +
+  scale_x_date(date_labels = "%b", breaks = SortedTransfers3$Month_2) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(strip.background =element_rect(fill="#FFC13D"))+
+  theme(strip.text = element_text(colour = '#323DA5')) + 
+  scale_color_manual(values=c("#323DA5", "#FFC13D"))
+
+```
+
+
+```{r , fig.width=10, fig.height=4, fig.fullwidth=TRUE}
+SortedTransfersU <- SortedTransfers3 %>% filter(Age == "24 and Under")
+
+myts <- ts(SortedTransfersU$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
+ggseasonplot(myts, col = colorPalette) + 
+  geom_line(size = 1.3) + 
+  theme_bw()+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
+  labs(title = "Transfer Application Flow: \n 24 and Under",
+           y = "Applications",
+           x = "")  + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+axis.title.x = element_text(color="black", size=12, face="bold"))
+
+
+SortedTransfersO <- SortedTransfers3 %>% filter(Age == "25 and Up")
+
+myts <- ts(SortedTransfersO$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
+ggseasonplot(myts, col = colorPalette) + 
+  geom_line(size = 1.3) + 
+  theme_bw()+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
+  labs(title = "Transfer Application Flow: \nAges 25 and Up",
+           y = "Applications",
+           x = "")  + 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+axis.title.x = element_text(color="black", size=12, face="bold"))
+```
+
+
+
+
 
 
 # Conclusions
@@ -166,6 +350,7 @@ knitr::kable(
 Notice that there is no number preceding the note. $x \in [a, b]$有
 $$\frac{d}{dx}\left( \int_{a}^{x} f(u)\,du\right)=f(x).$$
 ```
+
 
 
 
