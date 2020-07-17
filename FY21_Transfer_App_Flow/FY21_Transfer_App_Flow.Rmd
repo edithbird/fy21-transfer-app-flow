@@ -1,7 +1,6 @@
 ---
-title: "Marketing Report"
-subtitle: "Office of Marketing and Brand Management"
-date: "`r Sys.Date()`"
+title: "Office of Marketing and Brand Management"
+date: "July 10, 2020, (updated `r format(Sys.time(), '%B %d, %Y')`)"
 
 output:
   tufte::tufte_handout:
@@ -41,22 +40,143 @@ knitr::opts_chunk$set(
 	tidy = FALSE
 )
 options(tinytex.verbose = TRUE)
+
 ```
 
-# FY21 Transfer Student Application Flow
+# __FY21 Transfer Student Application Flow__
 
 # Description
 
 
-`r newthought('The purpose of this report ')` is to revisit the flow of applications to the Transfer programs. 
-    \href{https://blog.adstage.io/facebook-ads-benchmarks}{{\color{blue}{\underline{FB Newsfeed }}}} CTR overall experienced a 24% drop from July, 2017 - July, 2018.
-
-
-
+`r newthought('The purpose of this report')` is to revisit the flow of applications to the Transfer programs among 19-24 year olds. This is important because the cadence of this process is different from that of the working adult cohort (years 25 and over). 
 
 # Findings
 
+The table below illustrates the flow of applications among current undergraduates to the Transfer program at the University of Southern Maine (USM), January 1, 2017 - present. 
+
+
 ```{r}
+TransferApps <- read.csv("C:/Users/christine.iyer/Box/FY21_Transfer_App_Flow/All_Transfers_Born_Anytime.csv", header = T, stringsAsFactors = F)
+
+ TransferApps <- TransferApps %>% 
+  mutate(App.Application.Date = as.Date(App.Application.Date, format = "%m/%d/%Y"), 
+                                        Created.Date = as.Date(Created.Date, format = "%m/%d/%Y"), 
+                                        Birthdate = as.Date(Birthdate, format = "%m/%d/%Y")) %>%
+  select(Email, Primary.City, Primary.State.Province, Primary.County, Birthdate, Created.Date, App.Application.Date, App.Application.Status, Student.Stage)
+  
+Confirmed <- c("Confirmed", "Withdrawn (After Confirmed)")
+Enrolled <- c("Enrolled")
+Admitted <- c("Admitted (Not Confirmed)", "Withdrawn (After Admitted)", "Withdrawn (After Decision)")
+SortedTransfers <- TransferApps %>% 
+  mutate(Stage = ifelse(App.Application.Status == "", "Inquiry", ifelse(App.Application.Status == "Enrolled", "Enrolled", 
+                                                                         ifelse(App.Application.Status %in% Admitted, "Admitted", 
+                                                                                ifelse(App.Application.Status %in% Confirmed, "Confirmed", "Applied")))))
+
+SortedTransfers <-  SortedTransfers %>% 
+  
+  group_by(Stage, Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate) %>% summarise(n = n()) %>% spread(Stage, n) %>% select(Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate,Inquiry, Applied, Admitted, Confirmed, Enrolled)
+
+
+SortedTransfers <- SortedTransfers %>% mutate(AgeAtApp = difftime(App.Application.Date,Birthdate,  units = "weeks"), Age = as.numeric(round(AgeAtApp/52,0)), Age = ifelse(Age < 25, "24 and Under", "25 and Up"))
+
+
+#tail(SortedTransfers)
+SortedTransfers1 <- SortedTransfers %>% 
+  filter(Age == "24 and Under") %>% 
+  mutate_at(7:11, ~replace(., is.na(.), 0)) %>% 
+  mutate(
+    Applied = sum(Applied) + sum(Admitted)+ sum(Confirmed) + sum(Enrolled), 
+    Admitted = sum(Admitted)+ sum(Confirmed) + sum(Enrolled),
+    Confirmed =  sum(Confirmed) + sum(Enrolled),
+    Enrolled = sum(Enrolled)) %>% 
+  group_by(Age, App.Application.Date) %>% 
+  summarise(Applied = sum(Applied)) %>% 
+  filter(Applied > 0)
+
+
+SortedTransfers2 <-  SortedTransfers1 %>%
+  na.omit() %>% 
+  arrange(App.Application.Date)
+
+colorPalette <- c("#323DA5", "#FFC13D", "#4595A4", "#C55A82" )
+
+
+SortedTransfers3 <- SortedTransfers1 %>% 
+  mutate(Month = as.yearmon(App.Application.Date), 
+         Year = year(App.Application.Date), 
+         Month_1 = month(App.Application.Date), 
+         Month_2 = as.Date(paste0("2017-", Month_1,"-01"),"%Y-%m-%d")) %>% 
+  filter(Year >2016) %>% 
+  group_by(Month_2, Year, Age) %>% 
+  summarise(Applied = sum(Applied))
+```
+
+#
+
+While at first glance, the year over year timing might appear asynchronous, the annual patterns share some parallels. These similarities are more apparent when viewed in 4 distinct tables. 
+
+#
+
+```{r fig.width=10, fig.height=7, out.extra = ''}
+
+SortedTransfersU <- SortedTransfers3 %>% filter(Age == "24 and Under")
+
+myts <- ts(SortedTransfersU$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
+ggseasonplot(myts, col = colorPalette) + 
+  geom_line(size = 1.3) + 
+  theme_bw()+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
+  labs(title = "Transfer Application Flow: \n 24 and Under",
+           y = "Applications",
+           x = "")  + 
+  theme(panel.grid.major = element_blank(), #panel.grid.minor = element_blank(),
+panel.background = element_blank(), axis.line = element_line(colour = "black"), 
+axis.title.x = element_text(color="black", size=12, face="bold"))+ 
+  theme_bw(base_size = 12)   + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(strip.background =element_rect(fill="#FFC13D"))+
+  theme(strip.text = element_text(colour = '#323DA5'))
+
+```
+
+
+```{r  fig.width=10, fig.height=8, out.extra = ''}
+
+
+
+
+ggplot(SortedTransfers3, aes(x = Month_2,y = Applied, group=Age, color=Age)) +
+  geom_line(size = 1) +
+  #geom_smooth(color = "#323DA5", se = FALSE)+
+  facet_wrap(~ Year, ncol = 1.1) +
+      labs(title = "Transfer Application Flow",
+           # subtitle = "Data plotted by year",
+           y = "Applications",
+           x = "") + 
+  theme_bw(base_size = 12)  +
+  scale_x_date(date_labels = "%b", breaks = SortedTransfers3$Month_2) + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(strip.background =element_rect(fill="#FFC13D"))+
+  theme(strip.text = element_text(colour = '#323DA5')) + 
+  scale_color_manual(values=c("#323DA5", "#FFC13D"))
+
+```
+
+# Conclusions
+
+ 
+* The application cycle among current undergraduate students begins in August, peaks in November, slows a bit in December, and has a second wave in January. After a short decline in February, we see another spurt in March. Applications trickle in through the spring, slowly declining until summer. The application stream is at its most sluggish through the summer months. 
+
+* This pattern has been the norm since January, 2017. 
+* If this pattern remains consistent in 2020, which it may or may not due to the anomalous occurrence of the Covid-19 pandemic, we can expect application movement to shift upward at the end of the summer. We are currently at an annual low point.  
+
+
+
+\href{https://www.wrike.com/open.htm?id=533203886}{{\color{blue}{\underline{Wrike Project Details}}}}
+
+\href{https://github.com/edithbird/fy21-transfer-app-flow}{{\color{blue}{\underline{Github Repository}}}}
+
+```{r eval=FALSE, include=FALSE}
 TransferApps <- read.csv("C:/Users/christine.iyer/Box/FY21_Transfer_App_Flow/All_Transfers_Born_After_1990.csv", header = T, stringsAsFactors = F)
 
 TransferApps <- TransferApps %>% 
@@ -152,7 +272,7 @@ compose_email(body = body_text) %>%
 
 
 
-```{r fig.fullwidth = TRUE, fig.height=8}
+```{r eval=FALSE, fig.fullwidth=TRUE, fig.height=8, include=FALSE}
 #tail(SortedTransfers)
 SortedTransfers1 <- SortedTransfers %>% 
   mutate_at(6:10, ~replace(., is.na(.), 0)) %>% 
@@ -201,7 +321,7 @@ ggplot(SortedTransfers3, aes(x = Month_2,y = Applied)) +
 ```
 
 
-```{r r, fig.width=10, fig.height=6, fig.fullwidth=TRUE}
+```{r r, eval=FALSE, fig.fullwidth=TRUE, fig.height=6, fig.width=10, include=FALSE}
 
 myts <- ts(SortedTransfers3$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
 ggseasonplot(myts, col = colorPalette) + 
@@ -214,144 +334,7 @@ ggseasonplot(myts, col = colorPalette) +
   theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
 panel.background = element_blank(), axis.line = element_line(colour = "black"), 
 axis.title.x = element_text(color="black", size=12, face="bold"))
-
 ```
-
-
----
-
-```{r}
-TransferApps <- read.csv("C:/Users/christine.iyer/Box/FY21_Transfer_App_Flow/All_Transfers_Born_Anytime.csv", header = T, stringsAsFactors = F)
-
- TransferApps <- TransferApps %>% 
-  mutate(App.Application.Date = as.Date(App.Application.Date, format = "%m/%d/%Y"), 
-                                        Created.Date = as.Date(Created.Date, format = "%m/%d/%Y"), 
-                                        Birthdate = as.Date(Birthdate, format = "%m/%d/%Y")) %>%
-  select(Email, Primary.City, Primary.State.Province, Primary.County, Birthdate, Created.Date, App.Application.Date, App.Application.Status, Student.Stage)
-  
-Confirmed <- c("Confirmed", "Withdrawn (After Confirmed)")
-Enrolled <- c("Enrolled")
-Admitted <- c("Admitted (Not Confirmed)", "Withdrawn (After Admitted)", "Withdrawn (After Decision)")
-SortedTransfers <- TransferApps %>% 
-  mutate(Stage = ifelse(App.Application.Status == "", "Inquiry", ifelse(App.Application.Status == "Enrolled", "Enrolled", 
-                                                                         ifelse(App.Application.Status %in% Admitted, "Admitted", 
-                                                                                ifelse(App.Application.Status %in% Confirmed, "Confirmed", "Applied")))))
-unique(SortedTransfers$Stage)
-SortedTransfers <-  SortedTransfers %>% 
-  
-  group_by(Stage, Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate) %>% summarise(n = n()) %>% spread(Stage, n) %>% select(Email,Created.Date, App.Application.Date, Primary.City, Primary.State.Province, Birthdate,Inquiry, Applied, Admitted, Confirmed, Enrolled)
-
-
-SortedTransfers <- SortedTransfers %>% mutate(AgeAtApp = difftime(App.Application.Date,Birthdate,  units = "weeks"), Age = as.numeric(round(AgeAtApp/52,0)), Age = ifelse(Age < 25, "24 and Under", "25 and Up"))
-```
-
-```{r fig.fullwidth=TRUE, fig.height=8, fig.width=6}
-
-#tail(SortedTransfers)
-SortedTransfers1 <- SortedTransfers %>% 
-  mutate_at(7:11, ~replace(., is.na(.), 0)) %>% 
-  mutate(
-    Applied = sum(Applied) + sum(Admitted)+ sum(Confirmed) + sum(Enrolled), 
-    Admitted = sum(Admitted)+ sum(Confirmed) + sum(Enrolled),
-    Confirmed =  sum(Confirmed) + sum(Enrolled),
-    Enrolled = sum(Enrolled)) %>% 
-  group_by(Age, App.Application.Date) %>% 
-  summarise(Applied = sum(Applied)) %>% 
-  filter(Applied > 0)
-
-
-SortedTransfers2 <-  SortedTransfers1 %>%
-  na.omit() %>% 
-  arrange(App.Application.Date)
-
-colorPalette <- c("#323DA5", "#FFC13D", "#4595A4", "#C55A82" )
-
-
-SortedTransfers3 <- SortedTransfers1 %>% 
-  mutate(Month = as.yearmon(App.Application.Date), 
-         Year = year(App.Application.Date), 
-         Month_1 = month(App.Application.Date), 
-         Month_2 = as.Date(paste0("2017-", Month_1,"-01"),"%Y-%m-%d")) %>% 
-  filter(Year >2016) %>% 
-  group_by(Month_2, Year, Age) %>% 
-  summarise(Applied = sum(Applied))
-
-
-
-ggplot(SortedTransfers3, aes(x = Month_2,y = Applied, group=Age, color=Age)) +
-  geom_line(size = 1) +
-  #geom_smooth(color = "#323DA5", se = FALSE)+
-  facet_wrap(~ Year, ncol = 1.1) +
-      labs(title = "Transfer Application Flow",
-           # subtitle = "Data plotted by year",
-           y = "Applications",
-           x = "") + 
-  theme_bw(base_size = 12)  +
-  scale_x_date(date_labels = "%b", breaks = SortedTransfers3$Month_2) + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
-  theme(strip.background =element_rect(fill="#FFC13D"))+
-  theme(strip.text = element_text(colour = '#323DA5')) + 
-  scale_color_manual(values=c("#323DA5", "#FFC13D"))
-
-```
-
-
-```{r , fig.width=10, fig.height=4, fig.fullwidth=TRUE}
-SortedTransfersU <- SortedTransfers3 %>% filter(Age == "24 and Under")
-
-myts <- ts(SortedTransfersU$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
-ggseasonplot(myts, col = colorPalette) + 
-  geom_line(size = 1.3) + 
-  theme_bw()+ 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
-  labs(title = "Transfer Application Flow: \n 24 and Under",
-           y = "Applications",
-           x = "")  + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"), 
-axis.title.x = element_text(color="black", size=12, face="bold"))
-
-
-SortedTransfersO <- SortedTransfers3 %>% filter(Age == "25 and Up")
-
-myts <- ts(SortedTransfersO$Applied, start=c(2017, 1), end=c(2020, 7), frequency=12)
-ggseasonplot(myts, col = colorPalette) + 
-  geom_line(size = 1.3) + 
-  theme_bw()+ 
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold")) + 
-  labs(title = "Transfer Application Flow: \nAges 25 and Up",
-           y = "Applications",
-           x = "")  + 
-  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
-panel.background = element_blank(), axis.line = element_line(colour = "black"), 
-axis.title.x = element_text(color="black", size=12, face="bold"))
-```
-
-
-
-
-
-
-# Conclusions
-
- 
-* Facebook has not published benchmarks for this platform. View and completion rates are \textcolor{red}{slightly down} from this same quarter FY19, but the website has far more unique pageviews.
-
-* In general,
-    \href{https://blog.adstage.io/facebook-ads-benchmarks}{{\color{blue}{\underline{FB Newsfeed }}}} CTR overall experienced a 24% drop from July, 2017 - July, 2018.
-
-* Two
-
-\href{https://www.wrike.com/open.htm?id=533203886}{{\color{blue}{\underline{Wrike Project Details}}}}
-
-\href{https://github.com/edithbird/fy21-transfer-app-flow}{{\color{blue}{\underline{Github Repository}}}}
-
-```{marginfigure, echo = TRUE}
-Notice that there is no number preceding the note. $x \in [a, b]$有
-$$\frac{d}{dx}\left( \int_{a}^{x} f(u)\,du\right)=f(x).$$
-```
-
-
 
 
 
